@@ -1,0 +1,319 @@
+/////BACKEND CODE//////
+
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import os
+import json
+
+app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
+
+# Initialize data file
+DATA_FILE = 'financial_data.json'
+if not os.path.exists(DATA_FILE):
+    with open(DATA_FILE, 'w') as f:
+        json.dump({}, f)
+
+@app.route('/api/data', methods=['GET', 'POST'])
+def handle_data():
+    if request.method == 'GET':
+        try:
+            with open(DATA_FILE, 'r') as f:
+                data = json.load(f)
+            return jsonify({'status': 'success', 'data': data})
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+    
+    elif request.method == 'POST':
+        try:
+            new_data = request.json
+            with open(DATA_FILE, 'w') as f:
+                json.dump(new_data, f, indent=4)
+            return jsonify({'status': 'success'})
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)}), 400
+
+@app.route('/api/budget', methods=['GET'])
+def calculate_budget():
+    try:
+        with open(DATA_FILE, 'r') as f:
+            data = json.load(f)
+        
+        income = data.get('income', 0)
+        expenses = data.get('expenses', {})
+        total_expenses = sum(expenses.values())
+        remaining = income - total_expenses
+        
+        budget_data = {
+            'income': income,
+            'expenses': expenses,
+            'total_expenses': total_expenses,
+            'remaining': remaining,
+            'status': 'healthy'
+        }
+        
+        if remaining < 0:
+            budget_data['status'] = 'danger'
+        elif remaining < (income * 0.2):
+            budget_data['status'] = 'warning'
+            
+        return jsonify({'status': 'success', 'data': budget_data})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
+
+
+
+
+
+//////FRONTEND CODE////////
+    <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Financial Assistant</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1, h2 {
+            color: #333;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, button {
+            padding: 8px;
+            width: 100%;
+            box-sizing: border-box;
+            margin-bottom: 10px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .budget-summary {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+        }
+        .alert {
+            padding: 10px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+        }
+        .alert-danger {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .alert-warning {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .alert-success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Financial Assistant</h1>
+        
+        <div class="form-group">
+            <label for="name">Your Name</label>
+            <input type="text" id="name">
+        </div>
+        
+        <div class="form-group">
+            <label for="income">Monthly Income ($)</label>
+            <input type="number" id="income">
+        </div>
+        
+        <h2>Expenses</h2>
+        <div id="expenses-container">
+            <!-- Expenses will be added here -->
+        </div>
+        
+        <button id="save-btn" onclick="saveData()">Save Data</button>
+        <button onclick="loadBudget()">Calculate Budget</button>
+        
+        <div id="budget-summary" class="budget-summary" style="display: none;">
+            <h2>Budget Summary</h2>
+            <div id="budget-content"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:5000/api';
+        
+        // Initialize default expenses
+        const defaultExpenses = {
+            'Housing': 0,
+            'Utilities': 0,
+            'Food': 0,
+            'Transportation': 0,
+            'Healthcare': 0,
+            'Entertainment': 0,
+            'Other': 0
+        };
+        
+        // Load data when page loads
+        window.onload = async function() {
+            await loadData();
+            renderExpenseInputs();
+        };
+        
+        // Load data from backend
+        async function loadData() {
+            try {
+                const response = await fetch(`${API_URL}/data`);
+                if (!response.ok) throw new Error('Failed to load data');
+                
+                const result = await response.json();
+                if (result.status === 'success') {
+                    document.getElementById('name').value = result.data.name || '';
+                    document.getElementById('income').value = result.data.income || 0;
+                    
+                    // Update expenses if they exist in the data
+                    if (result.data.expenses) {
+                        for (const [category, amount] of Object.entries(result.data.expenses)) {
+                            defaultExpenses[category] = amount;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading data:', error);
+            }
+        }
+        
+        // Render expense inputs
+        function renderExpenseInputs() {
+            const container = document.getElementById('expenses-container');
+            container.innerHTML = '';
+            
+            for (const [category, amount] of Object.entries(defaultExpenses)) {
+                const div = document.createElement('div');
+                div.className = 'form-group';
+                div.innerHTML = `
+                    <label for="expense-${category}">${category} ($)</label>
+                    <input type="number" id="expense-${category}" value="${amount}">
+                `;
+                container.appendChild(div);
+            }
+        }
+        
+        // Save data to backend
+        async function saveData() {
+            const data = {
+                name: document.getElementById('name').value,
+                income: parseFloat(document.getElementById('income').value) || 0,
+                expenses: getExpenseValues()
+            };
+            
+            try {
+                const response = await fetch(`${API_URL}/data`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+                
+                if (!response.ok) throw new Error('Failed to save data');
+                
+                const result = await response.json();
+                if (result.status === 'success') {
+                    alert('Data saved successfully!');
+                }
+            } catch (error) {
+                console.error('Error saving data:', error);
+                alert('Error saving data: ' + error.message);
+            }
+        }
+        
+        // Get expense values from inputs
+        function getExpenseValues() {
+            const expenses = {};
+            for (const category in defaultExpenses) {
+                expenses[category] = parseFloat(document.getElementById(`expense-${category}`).value) || 0;
+            }
+            return expenses;
+        }
+        
+        // Load and display budget
+        async function loadBudget() {
+            try {
+                const response = await fetch(`${API_URL}/budget`);
+                if (!response.ok) throw new Error('Failed to load budget');
+                
+                const result = await response.json();
+                if (result.status === 'success') {
+                    displayBudget(result.data);
+                }
+            } catch (error) {
+                console.error('Error loading budget:', error);
+                alert('Error loading budget: ' + error.message);
+            }
+        }
+        
+        // Display budget information
+        function displayBudget(data) {
+            const container = document.getElementById('budget-content');
+            let html = `
+                <p>Income: $${data.income.toFixed(2)}</p>
+                <h3>Expenses:</h3>
+                <ul>
+            `;
+            
+            for (const [category, amount] of Object.entries(data.expenses)) {
+                const percentage = data.income > 0 ? (amount / data.income * 100).toFixed(1) : 0;
+                html += `<li>${category}: $${amount.toFixed(2)} (${percentage}%)</li>`;
+            }
+            
+            html += `
+                </ul>
+                <p>Total Expenses: $${data.total_expenses.toFixed(2)}</p>
+                <p>Remaining: $${data.remaining.toFixed(2)}</p>
+            `;
+            
+            if (data.status === 'danger') {
+                html += `<div class="alert alert-danger">⚠️ WARNING: You're spending more than you earn!</div>`;
+            } else if (data.status === 'warning') {
+                html += `<div class="alert alert-warning">⚠️ You have less than 20% of income remaining</div>`;
+            } else {
+                html += `<div class="alert alert-success">✅ You have a healthy budget</div>`;
+            }
+            
+            container.innerHTML = html;
+            document.getElementById('budget-summary').style.display = 'block';
+        }
+    </script>
+</body>
+</html>
